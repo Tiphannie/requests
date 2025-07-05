@@ -1,0 +1,126 @@
+name: Replay Trivy Scans on Last 50 Commits (Full + Incremental)
+
+on:
+  push:
+      branches:
+        - replay-latest-40
+  workflow_dispatch:
+
+jobs:
+  replay-trivy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sha:
+          - 821770e822a20a21b207b3907ea83878bda1d396
+          - 59f8aa2adf1d3d06bcbf7ce6b13743a1639a5401
+          - 5b4b64c3467fd7a3c03f91ee641aaa348b6bed3b
+          - 7bc45877a86192af77645e156eb3744f95b47dae
+          - 96ba401c1296ab1dda74a2365ef36d88f7d144ef
+          - 7341690e842a23cf18ded0abd9229765fa88c4e2
+          - 6716d7c9f29df636643fa2489f98890216525cb0
+          - a7e1c745dc23c18e836febd672416ed0c5d8d8ae
+          - c799b8167a13416833ad3b4f3298261a477e826f
+          - c65c780849563c891f35ffc98d3198b71011c012
+          - 579cd9f23319ebc65b71613f59e2b7b37d67276d
+          - c54d0347e24f38b40881f1e0a8bfc9fbce583298
+          - 991f05dcd922b1c4036067cb0473abc17db3c806
+          - 4ce9520a1cfa2e91abe5a923498f49e1fdb2e4ee
+          - 42a1dd640ca42ccfc22b00ba29d1bb0c3e51c9d2
+          - c4c8e20289ab82edad55d2fc07b42cbf08ae1441
+          - a5cb4284e18555d9e179f309356178410dbfdaf1
+          - 2019450b43511289d45c6b3e7376f2813e1c27b4
+          - 1764cc938efc3cc9720188dfa6c3852c45211aa0
+          - e946665c5953ab40e6dbb29cc8c496ee625fdadd
+          - 8ba805fa93c3f0fc958b48bc136ed565d7c82872
+          - 9ebebdef98a6aacfbedcf2ca61ba0eaecc2563f4
+          - 507409661335bd3dd8a7e39f04d07b42e519becc
+          - 1b7c37ef4e3db003cc52f09da9ab6b947054e245
+          - 5d31ddbf7b3f512dd3c61952d2c16e980a2b7dc1
+          - a2fd25ff34b66ef71b54dfc90e09a4e4152357f6
+          - d96f9982a276c73ab078b255c94397cf4d7f6cc2
+          - b25f2b5ec2a113d4b3a1e6311f617a015f4155f3
+          - f761e74a4d50d2e88d9e30e660494b36c9d630f8
+          - f2a6ae5e3267f64c47059fd64e43c02e0891f523
+          - 11f63a330bc7b9026086e3d259f400f9c702b542
+          - e361622fae03f08b16c48a0a1414a718d9d45d25
+          - fe0583ba49cf162e1a7fe35ae05de6a62b8372fa
+          - 8c36da656df15111c423975381f523e0b9db7326
+          - b653d80ded3680dc3780557ded01e23074f7e6a4
+          - 23540c93cac97c763fe59e843a08fa2825aa80fd
+          - ad959acfcfa77c3d9360a5f62df4a4789eed0fb3
+          - a6cf27a77f6f5dd6116096e95c16e7c1a616b419
+          - ed0b1b58023276adc66615f3af9bee22d0d16e1b
+          - 1f16cffa436ca8635a4660199a055c6beb171a07
+        
+
+    steps:
+      - name: Checkout specific commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+
+      - name: Setup artifact directories
+        run: |
+          mkdir -p scan-reports
+          mkdir -p logs
+
+      - name: Install pinned Trivy
+        run: |
+          wget https://github.com/aquasecurity/trivy/releases/download/v0.62.0/trivy_0.62.0_Linux-64bit.deb
+          sudo dpkg -i trivy_0.62.0_Linux-64bit.deb
+
+      - name: Download Trivy DB
+        run: trivy image --download-db-only alpine:latest
+
+      - name: Run Full Scan
+        run: |
+          export TRIVY_SKIP_DB_UPDATE=true
+          START_TIME=$(date +%s)
+          trivy fs --format json --output scan-reports/full-scan-${{ matrix.sha }}.json .
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          echo "Scan duration (seconds): ${DURATION}" >> logs/scan-info-full-${{ matrix.sha }}.txt
+          echo "Scan skipped: false" >> logs/scan-info-full-${{ matrix.sha }}.txt
+
+      - name: Check for lockfile changes and Run Incremental Scan
+        run: |
+          export TRIVY_SKIP_DB_UPDATE=true
+          if git diff-tree --no-commit-id --name-only -r ${{ matrix.sha }} | grep -E 'package-lock.json|Pipfile.lock'; then
+            echo "Lockfile changed, running incremental scan."
+            START_TIME=$(date +%s)
+            trivy fs --format json --output scan-reports/incremental-scan-${{ matrix.sha }}.json .
+            END_TIME=$(date +%s)
+            DURATION=$((END_TIME - START_TIME))
+            echo "Scan duration (seconds): ${DURATION}" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
+            echo "Scan skipped: false" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
+          else
+            echo "No lockfile changes detected, skipping incremental scan."
+            echo "{}" > scan-reports/incremental-scan-${{ matrix.sha }}.json
+            echo "Scan duration (seconds): 0" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
+            echo "Scan skipped: true" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
+          fi
+
+      - name: Upload Full Scan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-scan-${{ matrix.sha }}
+          path: scan-reports/full-scan-${{ matrix.sha }}.json
+
+      - name: Upload Incremental Scan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: incremental-scan-${{ matrix.sha }}
+          path: scan-reports/incremental-scan-${{ matrix.sha }}.json
+
+      - name: Upload Full Scan logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-full-${{ matrix.sha }}
+          path: logs/scan-info-full-${{ matrix.sha }}.txt
+
+      - name: Upload Incremental Scan logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-incremental-${{ matrix.sha }}
+          path: logs/scan-info-incremental-${{ matrix.sha }}.txt
