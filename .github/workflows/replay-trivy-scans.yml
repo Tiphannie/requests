@@ -55,17 +55,17 @@ jobs:
         
 
     steps:
-      - name: Checkout specific commit
+      - name: Checkout commit
         uses: actions/checkout@v4
         with:
           ref: ${{ matrix.sha }}
 
-      - name: Setup artifact directories
+      - name: Setup directories
         run: |
           mkdir -p scan-reports
           mkdir -p logs
 
-      - name: Install pinned Trivy
+      - name: Install Trivy
         run: |
           wget https://github.com/aquasecurity/trivy/releases/download/v0.62.0/trivy_0.62.0_Linux-64bit.deb
           sudo dpkg -i trivy_0.62.0_Linux-64bit.deb
@@ -73,7 +73,7 @@ jobs:
       - name: Download Trivy DB
         run: trivy image --download-db-only alpine:latest
 
-      - name: Run Full Scan
+      - name: Run Full Trivy Scan
         run: |
           export TRIVY_SKIP_DB_UPDATE=true
           START_TIME=$(date +%s)
@@ -83,44 +83,14 @@ jobs:
           echo "Scan duration (seconds): ${DURATION}" >> logs/scan-info-full-${{ matrix.sha }}.txt
           echo "Scan skipped: false" >> logs/scan-info-full-${{ matrix.sha }}.txt
 
-      - name: Check for lockfile changes and Run Incremental Scan
-        run: |
-          export TRIVY_SKIP_DB_UPDATE=true
-          if git diff-tree --no-commit-id --name-only -r ${{ matrix.sha }} | grep -E 'package-lock.json|Pipfile.lock'; then
-            echo "Lockfile changed, running incremental scan."
-            START_TIME=$(date +%s)
-            trivy fs --format json --output scan-reports/incremental-scan-${{ matrix.sha }}.json .
-            END_TIME=$(date +%s)
-            DURATION=$((END_TIME - START_TIME))
-            echo "Scan duration (seconds): ${DURATION}" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
-            echo "Scan skipped: false" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
-          else
-            echo "No lockfile changes detected, skipping incremental scan."
-            echo "{}" > scan-reports/incremental-scan-${{ matrix.sha }}.json
-            echo "Scan duration (seconds): 0" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
-            echo "Scan skipped: true" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
-          fi
-
-      - name: Upload Full Scan artifact
+      - name: Upload Full Scan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: full-scan-${{ matrix.sha }}
           path: scan-reports/full-scan-${{ matrix.sha }}.json
 
-      - name: Upload Incremental Scan artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: incremental-scan-${{ matrix.sha }}
-          path: scan-reports/incremental-scan-${{ matrix.sha }}.json
-
-      - name: Upload Full Scan logs
+      - name: Upload Full Scan Logs
         uses: actions/upload-artifact@v4
         with:
           name: logs-full-${{ matrix.sha }}
           path: logs/scan-info-full-${{ matrix.sha }}.txt
-
-      - name: Upload Incremental Scan logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: logs-incremental-${{ matrix.sha }}
-          path: logs/scan-info-incremental-${{ matrix.sha }}.txt
