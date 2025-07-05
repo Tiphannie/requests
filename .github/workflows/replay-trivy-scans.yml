@@ -73,24 +73,41 @@ jobs:
       - name: Download Trivy DB
         run: trivy image --download-db-only alpine:latest
 
-      - name: Run Full Trivy Scan
+      - name: Check for lockfile changes
+        id: check_lockfile
+        run: |
+          if git diff-tree --no-commit-id --name-only -r ${{ matrix.sha }} | grep -E 'package-lock.json|Pipfile.lock'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Conditional Trivy Scan
+        if: steps.check_lockfile.outputs.changed == 'true'
         run: |
           export TRIVY_SKIP_DB_UPDATE=true
           START_TIME=$(date +%s)
-          trivy fs --format json --output scan-reports/full-scan-${{ matrix.sha }}.json .
+          trivy fs --format json --output scan-reports/incremental-scan-${{ matrix.sha }}.json .
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
-          echo "Scan duration (seconds): ${DURATION}" >> logs/scan-info-full-${{ matrix.sha }}.txt
-          echo "Scan skipped: false" >> logs/scan-info-full-${{ matrix.sha }}.txt
+          echo "Scan duration (seconds): ${DURATION}" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
+          echo "Scan skipped: false" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
 
-      - name: Upload Full Scan Artifact
+      - name: Skip Trivy Scan (record zero duration)
+        if: steps.check_lockfile.outputs.changed == 'false'
+        run: |
+          echo "{}" > scan-reports/incremental-scan-${{ matrix.sha }}.json
+          echo "Scan duration (seconds): 0" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
+          echo "Scan skipped: true" >> logs/scan-info-incremental-${{ matrix.sha }}.txt
+
+      - name: Upload Incremental Scan Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: full-scan-${{ matrix.sha }}
-          path: scan-reports/full-scan-${{ matrix.sha }}.json
+          name: incremental-scan-${{ matrix.sha }}
+          path: scan-reports/incremental-scan-${{ matrix.sha }}.json
 
-      - name: Upload Full Scan Logs
+      - name: Upload Incremental Scan Logs
         uses: actions/upload-artifact@v4
         with:
-          name: logs-full-${{ matrix.sha }}
-          path: logs/scan-info-full-${{ matrix.sha }}.txt
+          name: logs-incremental-${{ matrix.sha }}
+          path: logs/scan-info-incremental-${{ matrix.sha }}.txt
